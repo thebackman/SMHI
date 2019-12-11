@@ -3,10 +3,8 @@
 
 import pandas as pd
 import smhi as smhi
-import helpers as helpers  # remove later on
 import importlib
 importlib.reload(smhi)
-importlib.reload(helpers)
 
 # -- listing the parameters that are avaliable
 
@@ -17,21 +15,34 @@ smhi.list_params()
 # all stations 
 df_stations = smhi.list_stations(param = 5)
 
-# one station
+# list one station
 df_stations.loc[df_stations["key"] == "159880"]
 
 # limit the stations further to those that have been online in recent years
 df_stations = df_stations.loc[(df_stations["starting"] >= '2000-01-01')]
 
+# take a random sample of stations
+df_random = df_stations.sample(n = 10, random_state= 11)
+df_random
 
-# FIXME: 
+# TODO:
+
 # limit the stations to within a geographical area
-# limit to a geographical area
+# fix the order of data frame columns so that they match
+
 
 # -- get the actual data
 
-# use get_stations functions to get all data from one or a set of stations
-# accepts a tuple of stations IDs or a dataframe with columns named key from
-# smhi.list_stations() above
+# create a tuple to try out stations
+# 97250: not active, no latest months data, only historical
+# 158820: active, both latest months and historical data
 
-smhi.get_stations(param = 5, station_keys= df_stations)
+station = (97250,)
+station = (158820,)
+
+# download for station(s)
+dict_df = smhi.get_stations(param = 5, station_keys = station)
+
+# access the data
+dict_df["df_latest"]
+dict_df["df_corrected"]

@@ -3,14 +3,8 @@ import api_endpoints
 import helpers
 import requests
 import pandas as pd
-
-# FIXME:
-
-# remove unneccesary comments
-# change variable names within functions
-# write docstrings
-# check so that functions work with all parameters depending on data structure
-
+import json
+import logging
 
 # -- functions
 
@@ -27,14 +21,12 @@ def list_params():
     resource = data_json["resource"]
     # loop over the json entries and print each parameter that is avaliable
 
-    # stora all param keys in a dict for later use
+    # store all param keys in a dict for later use (maybe)
     params = []
     for param in resource:
         print(param["title"] + " | " +  param["summary"] + " | " + param["key"] )
         params.append(param["key"])
-    return params
-
-
+    # return params
 
 
 def list_stations(param):
@@ -74,8 +66,10 @@ def list_stations(param):
     
     return(df_clean)
 
+
 def get_latest_months(param, station):
-    """ get data for latest months """
+    """
+    get data for latest months via JSON download """
 
     # -- API call
     
@@ -89,7 +83,7 @@ def get_latest_months(param, station):
     # create a data frame from the JSON data
     df = pd.DataFrame(data1["value"])
 
-    # fix the time stamps
+    # fix the timestamps
     df = df.rename(columns={"from": "starting", "to": "ending"})
     tmp1 = pd.to_datetime(df["starting"], unit = "ms")
     tmp2 = pd.to_datetime(df["ending"], unit = "ms")
@@ -98,11 +92,15 @@ def get_latest_months(param, station):
 
     # convert value to float64
     df["value"] = df.value.astype(float)
+
+    # add the station id
+    df["station_id"] = station
     
     return df
 
+
 def get_corrected(param, station):
-    """ get corrected archive """
+    """ get corrected archive via CSV download """
     
     # -- API call
     
@@ -111,29 +109,33 @@ def get_corrected(param, station):
     adr_full = adr.format(parameter = param, station = station)
     
     # download the csv data
-    try:
-        df = pd.read_csv(filepath_or_buffer= adr_full, skiprows= 9, delimiter=";")
+    df = pd.read_csv(filepath_or_buffer= adr_full, skiprows= 9, delimiter=";")
+       
+    # remove columns not needed and reorder to match latest months data
+    df_lim = df.iloc[:,[0, 4, 2, 1, 3]] 
         
-        # remove columns not needed and reorder to match latest
-        df_lim = df.iloc[:,[0, 4, 2, 1, 3]] 
+    # rename the columns
+    df_lim.columns = ["starting", "quality", "ref", "ending", "value"]
         
-        # rename the columns
-        df_lim.columns = ["starting", "quality", "ref", "ending", "value"]
-        
-        # fix datetime columns
-        tmp1 = pd.to_datetime(df_lim["starting"])
-        tmp2 = pd.to_datetime(df_lim["ending"])
-        df_lim = df_lim.assign(starting = tmp1)
-        df_lim = df_lim.assign(ending = tmp2)
+    # fix datetime columns
+    tmp1 = pd.to_datetime(df_lim["starting"])
+    tmp2 = pd.to_datetime(df_lim["ending"])
+    df_lim = df_lim.assign(starting = tmp1)
+    df_lim = df_lim.assign(ending = tmp2)
 
-    except:
-        print(f"The csv data for param {param} and station {station} could not be downloaded")
+    
+    # add the station id
+    df_lim["station_id"] = station
 
     return df_lim
 
 
 def get_stations(param, station_keys):
-    """ gets both latest months and corrected archive """
+    """
+    gets both latest months and corrected archive for
+    a set of stations. Contains the try catch logic needed
+    if any of the calls fail
+    """
 
     # -- create the iterable
 
@@ -141,21 +143,70 @@ def get_stations(param, station_keys):
         iterable = station_keys
     elif isinstance(station_keys, pd.DataFrame):
         iterable = station_keys["key"]
-    else:
-        print(f"No method avaliable for {type(station_keys)}")
-        return
+    
+    # -- Construct some holder structures for data frames
+
+    df_new = dict()
+    df_old = dict()
     
     # -- loop through set of stations
-
+    
+    # start loop over each station id and collect the data if avaliable
+    print(">>> Start downloading each station")
     for station_id in iterable:
+        print(f">>> Downloading {station_id}")
+        logging.info(f"# -- Downloading station {station_id}")
+        # get the latest months
+        logging.info(f"Downloading latest months for {station_id}")
         try:
-            df_months = get_latest_months(param = param, station= station_id)
-            df_corrected = get_corrected(param = param, station= station_id)
-            print(f"# -- processing station {station_id}")
-            print(df_months.head())
-            print(df_corrected.head())
-            # TODO: stack the data 
-        except:
-            print(f"Failed to download the data from station {station_id}")
-            continue
-            
+            df_new[station_id] = get_latest_months(param = param, station = station_id )
+            logging.debug(f"downloading latest months for {station_id} successful")
+        except json.decoder.JSONDecodeError:
+            logging.error(f"not possible to download latest months for {station_id}")
+        # get the corrected archive
+        logging.info(f"downloading corrected archive for {station_id}")
+        try:
+            df_old[station_id] = get_corrected(param = param, station = station_id)
+            logging.debug(f"downloaded corrected archive for {station_id} successful")
+        except Exception as error:
+            logging.error(f"not possible to download corrected archive for {station_id}")
+    
+    # -- gather the data
+
+    # get the number of data frames in each dict
+    len_new = len(df_new)
+    len_old = len(df_old)
+
+    # Stack the latest months into one data frame for each station
+    if len_new > 0:
+        df_latest = pd.concat(df_new.values(), ignore_index=True)
+    else:
+        df_latest = None
+
+    # Stack the corrected archive into one data frame for each station
+    if len_old > 0:
+        df_corrected = pd.concat(df_old.values(), ignore_index=True)
+    else:
+        df_corrected = None
+
+    # return all data
+    print("Check smhi.log for data download details!")
+    if df_latest is not None and df_corrected is not None :
+        logging.debug("both df_latest and df_corrected contains data")
+        dictus = {"df_latest": df_latest, "df_corrected": df_corrected}
+    elif df_latest is not None:
+        logging.info("only df_latest contain data")
+        dictus = {"df_latest": df_latest}
+    elif df_corrected is not None:
+        logging.info("only df_corrected contain data")
+        dictus = {"df_corrected": df_corrected}
+    else:
+        logging.info("no data frame contains data")
+        dictus = None
+    
+    # -- shutdown logging
+
+    logging.shutdown()
+    
+    return(dictus)
+    
