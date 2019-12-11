@@ -29,6 +29,7 @@ df_random
 
 # limit the stations to within a geographical area
 # fix the order of data frame columns so that they match
+# add some examples and actually do something with the data
 
 
 # -- get the actual data
@@ -39,9 +40,11 @@ df_random
 
 station = (97250,)
 station = (158820,)
+stations = (97250, 158820)
 
 # download for station(s)
 dict_df = smhi.get_stations(param = 5, station_keys = station)
+dict_df = smhi.get_stations(param = 5, station_keys = stations)
 
 # access the data
 dict_df["df_latest"]
